@@ -1,6 +1,20 @@
 const Product = require('../models/Product');
+const { cloudinary } = require('../config/cloudinary');
 
-// ── GET /api/products ────────────────────────────────────
+// ── Helper: upload buffer to Cloudinary via stream ────────
+const uploadToCloudinary = (buffer) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: 'ambika_tools_products' },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result.secure_url);
+      }
+    );
+    stream.end(buffer);
+  });
+
+// ── GET /api/products ─────────────────────────────────────
 const getProducts = async (req, res) => {
   try {
     const filter = {};
@@ -29,20 +43,21 @@ const getProduct = async (req, res) => {
 const createProduct = async (req, res) => {
   try {
     if (req.body.specs && typeof req.body.specs === 'string') {
-      try {
-        req.body.specs = JSON.parse(req.body.specs);
-      } catch (e) {
-        req.body.specs = {};
-      }
+      try { req.body.specs = JSON.parse(req.body.specs); }
+      catch (e) { req.body.specs = {}; }
     }
+
     const { name, tagline, description, categoryId, image, specs, featured, price } = req.body;
 
     if (!name || !categoryId) {
       return res.status(400).json({ error: 'Name and categoryId are required.' });
     }
 
-    // If multer uploaded a file, Cloudinary provides the URL in req.file.path
-    const imageUrl = req.file ? req.file.path : (image || '');
+    // If file uploaded, stream buffer to Cloudinary directly
+    let imageUrl = image || '';
+    if (req.file) {
+      imageUrl = await uploadToCloudinary(req.file.buffer);
+    }
 
     const product = await Product.create({
       name, tagline, description, categoryId,
@@ -62,14 +77,16 @@ const createProduct = async (req, res) => {
 const updateProduct = async (req, res) => {
   try {
     if (req.body.specs && typeof req.body.specs === 'string') {
-      try {
-        req.body.specs = JSON.parse(req.body.specs);
-      } catch (e) {
-        req.body.specs = {};
-      }
+      try { req.body.specs = JSON.parse(req.body.specs); }
+      catch (e) { req.body.specs = {}; }
     }
+
     const updates = { ...req.body };
-    if (req.file) updates.image = req.file.path;
+
+    // If new file uploaded, stream to Cloudinary
+    if (req.file) {
+      updates.image = await uploadToCloudinary(req.file.buffer);
+    }
 
     const product = await Product.findByIdAndUpdate(
       req.params.id,
